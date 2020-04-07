@@ -1,0 +1,393 @@
+---
+title: "Covid 19"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+    css: leaflet_css_style.css
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(lubridate)
+library(leaflet)
+library(coronavirus)
+library(shinyWidgets)
+library(ggthemes)
+library(plotly)
+```
+
+
+```{r message=FALSE,warning=FALSE, include=FALSE}
+
+# Data preparation
+
+data("coronavirus")
+# updata data
+update_datasets(silence = T)
+
+```
+
+
+Summary
+==============================================================
+
+Column{data-width=150}
+--------------------------------------------------------------------------
+
+```{r world summary}
+# General summary
+# covid_df <- coronavirus %>% 
+#   group_by(Country.Region, Province.State,Lat, Long, type) %>% 
+#   summarise(cases = sum(cases))
+
+
+
+general_summary_df <- coronavirus %>% 
+  group_by(type) %>% 
+  summarise(cases = sum(cases)) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = type, values_from = cases)
+
+death_rate <- (general_summary_df$death/general_summary_df$confirmed) %>% 
+  scales::percent(accuracy = 0.01)
+
+```
+
+### Update
+```{r}
+latest_date <- max(coronavirus$date)
+
+output$update_text <- renderText(expr = {
+  str_glue("Update as of :
+           {latest_date}")
+})
+
+textOutput('update_text')
+```
+
+### Confirmed
+```{r confirmed cases valuebox}
+
+output$confirmed <- renderValueBox(expr = {
+  valueBox(value = general_summary_df$confirmed, caption = "Confirmed",
+           icon = "fa-chart-line",color='info'
+           )
+})
+
+valueBoxOutput("confirmed")
+
+```
+
+### Deaths
+```{r Deaths value box}
+
+output$death <- renderValueBox(expr = {
+  valueBox(value = general_summary_df$death, caption = "Deaths",
+           icon = "fa-heartbeat",color = 'danger'
+           )
+})
+
+valueBoxOutput("death")
+
+```
+
+### Recovered
+```{r Recovered value box}
+
+output$recovered <- renderValueBox(expr = {
+  valueBox(value = general_summary_df$recovered, caption = "Recovered",
+           icon ="fa-heart",color = "success"
+           )
+})
+
+valueBoxOutput("recovered")
+
+```
+
+### Death Rate
+```{r Death Rate valuebox}
+
+output$death_rate <- renderValueBox(expr = {
+  valueBox(value = death_rate, caption = "Death Rate",
+           icon = "fa-chart-line",color = "warning"
+           )
+})
+
+valueBoxOutput("death_rate")
+
+
+```
+
+
+Column{data-width=500}
+--------------------------------------------------------------------------
+
+```{r}
+
+timeline_df <- coronavirus %>% 
+  group_by(date,type) %>% 
+  summarise(cases = sum(cases)) %>% 
+  ungroup() 
+
+```
+
+###  Timeline for Confirmed  Cases
+
+```{r}
+
+timeline_confirmed_df <-  timeline_df %>% 
+  filter(type == 'confirmed') %>% 
+  mutate(cum_cases = cumsum(cases)) %>%
+  mutate(tooltip_text = str_glue("Date:{date}
+                                Confirmed:{cum_cases}"))
+
+total_confirmed_ylim <-  ceiling(
+  (timeline_confirmed_df$cum_cases %>% tail(1)/100000)) * 100000
+ 
+output$confirmed_timeline <- renderPlotly(expr = {
+  
+  confirmed_plot <- timeline_confirmed_df %>% 
+    ggplot(aes(date, cum_cases)) +
+    geom_line(color =  "#7c93f2", size = 0.7)+
+    geom_point(aes(text = tooltip_text),size = 1,alpha = 0.7)+
+    scale_y_continuous(breaks = seq(0, total_confirmed_ylim,200000),
+      labels = scales::comma_format(scale = 1e-3, suffix = 'k',
+                                                     big.mark = ','))+
+    theme_bw()+
+    theme(panel.border = element_blank(),
+          panel.grid.major.x = element_blank(),
+          axis.title = element_blank())
+  
+
+  ggplotly(confirmed_plot, tooltip = 'text')
+  
+})
+  
+plotlyOutput('confirmed_timeline')
+
+```
+
+### Timeline for Death Cases
+
+```{r}
+
+timeline_death_df <-  timeline_df %>%
+  filter(type == 'death') %>%
+  mutate(cum_cases = cumsum(cases)) %>%
+  mutate(tooltip_text = str_glue("Date:{date}
+                                Deaths:{cum_cases}"))
+
+total_death_ylim <-  ceiling(
+  (timeline_death_df$cum_cases %>% tail(1)/10000)) * 10000
+
+output$death_timeline <- renderPlotly(expr = {
+
+  death_plot <- timeline_death_df %>%
+    ggplot(aes(date, cum_cases)) +
+    geom_line(color =  "#f55925", size = 0.7)+
+    geom_point(aes(text = tooltip_text),size = 1,alpha = 0.7)+
+    scale_y_continuous(breaks = seq(0, total_death_ylim,10000),
+                       labels = scales::comma_format(scale = 1e-3,suffix = 'k', 
+                                                     big.mark = ','))+
+    theme_bw()+
+    theme(panel.border = element_blank(),
+          panel.grid.major.x = element_blank(),
+          axis.title = element_blank())
+
+
+  ggplotly(death_plot, tooltip = 'text')
+
+})
+
+plotlyOutput('death_timeline')
+
+
+
+```
+
+
+### Top 20 Most Affected Countries
+
+```{r}
+output$top_20 <- renderPlot(expr = {
+  
+  coronavirus %>% 
+    group_by(Country.Region,type) %>% 
+    summarise(cases = sum(cases)) %>% 
+    mutate(type = str_to_title(type)) %>% 
+    ungroup() %>% 
+    pivot_wider(names_from = type,values_from = cases) %>% 
+    top_n(n = 20, wt = Confirmed) %>% 
+    mutate(Country.Region = fct_reorder(Country.Region,Confirmed)) %>% 
+    pivot_longer(-Country.Region, names_to = "type") %>% 
+    ggplot(aes(type,Country.Region, fill = type))+
+    geom_tile(color = 'black')+
+    geom_text(aes(label = value), size = 5)+
+    scale_x_discrete(position = 'top')+
+    scale_fill_manual(values = c('Recovered' = "#299145","Death" = "#f55925",
+                        "Confirmed" = "#ebca5e"))+
+    theme_tufte()+
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_text(face = 'bold', size = 14),
+          axis.text.y = element_text(face = 'bold', size = 12),
+          axis.title.y = element_blank(),
+          legend.position = 'none')
+
+})
+
+plotOutput("top_20")
+
+```
+
+
+
+Map
+====================================================================
+
+Column {Map}
+-----------------------------------------------------------------------
+
+### Map : Confirmed Cases
+
+```{r}
+
+# country level summary
+map_plot_df <- coronavirus %>% 
+  group_by(Country.Region,type) %>% 
+  summarise(cases = sum(cases),
+            Lat = mean(Lat, na.rm = TRUE),
+            Long = mean(Long,na.rm = TRUE)) %>% 
+  ungroup() %>% 
+  filter(type == 'confirmed')
+
+
+# Replace latitude and longitude of some countries
+map_plot_df <- map_plot_df %>% 
+  mutate(Lat = case_when(
+    Country.Region == 'France'  ~ 46.2276 ,
+    Country.Region == 'United Kingdom' ~ 55.3781  ,
+    Country.Region == 'Denmark' ~  56.2639,
+    #Country_Region == 'Iceland' ~  64.9631 ,
+    Country.Region == 'Canada' ~ 51.2538,
+    Country.Region == 'Netherlands' ~ 52.1326  ,
+    TRUE ~ Lat
+  ))
+
+map_plot_df <- map_plot_df %>% 
+  mutate(Long = case_when(
+    Country.Region == 'France'  ~ 2.21370,
+    Country.Region == 'United Kingdom' ~  (-3.4360),
+    Country.Region == 'Denmark' ~  9.5018,
+    #Country_Region == 'Iceland' ~ -19.0208,
+    Country.Region == 'Canada' ~ (-85.3232),
+    Country.Region == 'Netherlands' ~  5.2913,
+    TRUE ~ Long
+  ))
+
+```
+
+
+```{r Add Continents}
+
+# add iso codes
+iso_codes <- read_csv('iso3_country_codes.csv')
+
+map_plot_df <- map_plot_df %>% 
+  left_join(iso_codes, by = c('Country.Region' = 'country')) %>% 
+  rename(country_code = iso3c) 
+# replace NA in country codes with Not found
+map_plot_df <- map_plot_df %>% 
+  mutate(country_code = ifelse(is.na(country_code),'Not_found',country_code))
+
+
+# adding continents
+country_code_df <- read_csv('country-and-continent-codes-list.csv')
+
+country_code_df <- country_code_df %>% 
+  select(Continent_Name, Three_Letter_Country_Code)
+
+map_plot_df <- map_plot_df %>% 
+  left_join(country_code_df, by = c('country_code' = 'Three_Letter_Country_Code'))
+
+# some countries belong to two continents - restricting them to only one
+map_plot_df <- map_plot_df %>% 
+  group_by(Country.Region) %>% 
+  slice(1) %>% 
+  ungroup()
+
+```
+
+
+```{r}
+
+continent_split <- group_split(map_plot_df, Continent_Name)
+
+names(continent_split) <- c("Africa","Asia",'Europe','North America',
+                            'Australia-Oceania','South America','Diamond-Cruise')
+
+
+map_plot_df <- reactive({
+  
+  if (input$region == 'World'){
+     continent_split %>% 
+      purrr::reduce(bind_rows)
+  } else{
+    continent_split[input$region] %>% 
+      purrr::reduce(bind_rows)
+    }
+})
+```
+
+
+```{r}
+
+output$map <- renderLeaflet(expr = {
+  
+ map_plot <- leaflet(data = map_plot_df()) %>% 
+   addProviderTiles(provider = providers$Stamen.TonerLite) %>% 
+   addCircleMarkers(
+        lng = ~ Long, lat = ~ Lat,
+        radius = ~ log(cases),
+        #fill = ~cases,
+        label = ~ str_glue("{Country.Region}
+                         Confirmed: {cases}")
+        ) 
+    
+  map_plot
+  })
+
+
+leafletOutput('map')
+
+
+```
+
+```{r}
+region_names <- c('World','Europe',"Asia",'Australia-Oceania','North America',
+                  'South America',"Africa",'Diamond-Cruise')
+
+absolutePanel(
+  
+  shinyWidgets::pickerInput(
+  inputId   = "region",
+  label     = h2("Select Region"),
+  choices   = region_names,
+  selected  = 'World',
+  multiple  = FALSE, width = 'fit',
+   options  = list(
+    `actions-box` = TRUE,
+    `selected-text-format` = "count > 3"
+  )),
+  top = 0, right = 40
+  
+)
+
+
+```
+
+
+
+
