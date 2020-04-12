@@ -18,6 +18,7 @@ library(shinyWidgets)
 library(ggthemes)
 library(plotly)
 library(DT)
+library(htmltools)
 ```
 
 ```{r message=FALSE,warning=FALSE, include=FALSE}
