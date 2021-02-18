@@ -6,3 +6,6 @@ The dashboard can be accessed at  https://ajay-byanjankar.shinyapps.io/Covid-19-
 
 
 ![Image of Dashboard](https://github.com/abyanjan/covid-19-dashboard/blob/master/dashboard_img.PNG)
+
+
+![Image of map](https://github.com/abyanjan/covid-19-dashboard/blob/master/map.PNG)
